@@ -266,14 +266,14 @@
       <div class="flex items-center justify-between pb-2 border-b border-[var(--border)] flex-wrap gap-2">
         <div class="font-bold text-xs sm:text-sm flex items-center gap-1.5">
           <span>📋</span>
-          <span>Daftar Tiket Bankroll Liga 1</span>
+          <span>Histori Bankroll</span>
           <span class="text-[10.5px] text-[var(--muted-foreground)] font-normal" id="bet-history-count">(0 tiket)</span>
         </div>
         <div class="flex items-center gap-1">
-          <button class="btn-sm text-[10.5px]" onclick="filterBetStatus('all')">Semua</button>
-          <button class="btn-sm text-[10.5px] text-emerald-600" onclick="filterBetStatus('won')">Menang</button>
-          <button class="btn-sm text-[10.5px] text-rose-600" onclick="filterBetStatus('lost')">Kalah</button>
-          <button class="btn-sm text-[10.5px] text-amber-600" onclick="filterBetStatus('pending')">Menunggu</button>
+          <button id="btn-filter-all" class="btn-sm text-[10.5px] font-bold bg-slate-800 text-white border border-slate-700 shadow-sm" onclick="filterBetStatus('all')">Semua</button>
+          <button id="btn-filter-won" class="btn-sm text-[10.5px] text-emerald-500 font-semibold hover:text-emerald-400" onclick="filterBetStatus('won')">Menang</button>
+          <button id="btn-filter-lost" class="btn-sm text-[10.5px] text-rose-500 font-semibold hover:text-rose-400" onclick="filterBetStatus('lost')">Kalah</button>
+          <button id="btn-filter-pending" class="btn-sm text-[10.5px] text-amber-500 font-semibold hover:text-amber-400" onclick="filterBetStatus('pending')">Menunggu</button>
         </div>
       </div>
       <div id="bet-history-list" class="space-y-2">
@@ -1920,6 +1920,16 @@ async function saveBetRecord() {
   showCustomDialog('Tiket Disimpan!', `Taruhan <strong>${newBet.typeLabel}</strong> pada <strong>${newBet.match}</strong> berhasil dicatat ke bankroll.`, '✅', [{ label: 'Selesai', class: 'btn-primary' }]);
 }
 
+async function toggleBetStatus(betId, newStatus) {
+  const bet = userBets.find(b => b.id === betId);
+  if (!bet) return;
+  bet.status = bet.status === newStatus ? 'pending' : newStatus;
+  localStorage.setItem('liga1_user_bets_v1', JSON.stringify(userBets));
+  await syncBetToCloud(bet);
+  renderBetKPIs();
+  renderBetHistory();
+}
+
 async function updateBetStatus(betId, newStatus) {
   const bet = userBets.find(b => b.id === betId);
   if (!bet) return;
@@ -1934,7 +1944,7 @@ async function deleteBetRecord(betId) {
   showCustomDialog('Hapus Tiket', 'Apakah Anda yakin ingin menghapus tiket taruhan ini dari bankroll?', '🗑️', [
     {
       label: 'Hapus',
-      class: 'bg-rose-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-rose-700',
+      class: 'bg-rose-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-rose-700 cursor-pointer',
       action: async () => {
         userBets = userBets.filter(b => b.id !== betId);
         localStorage.setItem('liga1_user_bets_v1', JSON.stringify(userBets));
@@ -1950,7 +1960,71 @@ async function deleteBetRecord(betId) {
 let activeBetStatusFilter = 'all';
 function filterBetStatus(status) {
   activeBetStatusFilter = status;
+  const filterKeys = ['all', 'won', 'lost', 'pending'];
+  filterKeys.forEach(s => {
+    const el = document.getElementById(`btn-filter-${s}`);
+    if (el) {
+      if (s === status) {
+        el.className = 'btn-sm text-[10.5px] font-bold bg-slate-800 text-white border border-slate-700 shadow-sm';
+      } else {
+        const color = s === 'won' ? 'text-emerald-500' :
+                      s === 'lost' ? 'text-rose-500' :
+                      s === 'pending' ? 'text-amber-500' : 'text-[var(--muted-foreground)]';
+        el.className = `btn-sm text-[10.5px] ${color} font-semibold hover:bg-[var(--muted)]`;
+      }
+    }
+  });
   renderBetHistory();
+}
+
+function formatBetDateHeader(b) {
+  const code = (b.leagueCode === 'LIGA1' || !b.leagueCode) ? 'L1' : b.leagueCode;
+  let dStr = b.dateStr || '';
+  if (b.date && (!dStr || dStr.includes('-') || dStr.includes('T'))) {
+    const raw = formatIndoDateTime(b.date, dStr);
+    const parts = raw.split(',');
+    if (parts.length > 2) {
+      dStr = parts.slice(1).join(',').replace('WIB', '').trim();
+    } else {
+      dStr = raw.replace('WIB', '').trim();
+    }
+  } else if (dStr) {
+    const parts = dStr.split(',');
+    if (parts.length > 2) {
+      dStr = parts.slice(1).join(',').replace('WIB', '').trim();
+    } else {
+      dStr = dStr.replace('WIB', '').trim();
+    }
+  }
+  return `${code} · ${dStr || '22 Okt, 15.30'}`;
+}
+
+function getBetSelectionLabel(b) {
+  const matchParts = (b.match || '').split(' vs ');
+  const homeTeam = b.home || (matchParts[0] ? matchParts[0].trim() : '');
+  const awayTeam = b.away || (matchParts[1] ? matchParts[1].trim() : '');
+  const t = (b.type || '').toUpperCase();
+  const tl = (b.typeLabel || '').toUpperCase();
+
+  if (t === '1X' || tl.includes('1X')) {
+    return homeTeam ? `${homeTeam} Seri/Menang (1X)` : 'Seri / Menang (1X)';
+  }
+  if (t === 'X2' || tl.includes('X2')) {
+    return awayTeam ? `${awayTeam} Seri/Menang (X2)` : 'Seri / Menang (X2)';
+  }
+  if (t === '1' || tl.includes('HOME WIN') || tl.includes('1 (HOME')) {
+    return homeTeam ? `${homeTeam} Win` : 'Home Win (1)';
+  }
+  if (t === '2' || tl.includes('AWAY WIN') || tl.includes('2 (AWAY')) {
+    return awayTeam ? `${awayTeam} Win` : 'Away Win (2)';
+  }
+  if (t === 'X' || tl.includes('DRAW') || tl.includes('SERI')) {
+    return 'Seri (Draw X)';
+  }
+  if (t === '12' || tl.includes('12')) {
+    return 'Home atau Away Win (12)';
+  }
+  return b.typeLabel || b.type || 'Pilihan';
 }
 
 function renderBetHistory() {
@@ -1963,58 +2037,85 @@ function renderBetHistory() {
     filtered = userBets.filter(b => b.status === activeBetStatusFilter);
   }
 
-  if (countEl) countEl.textContent = `(${filtered.length} tiket)`;
+  if (countEl) countEl.textContent = `(${userBets.length} tiket)`;
 
   if (!filtered.length) {
     list.innerHTML = `
-      <div class="p-6 text-center text-xs text-[var(--muted-foreground)] rounded-lg border border-dashed border-[var(--border)]">
+      <div class="p-6 text-center text-xs text-[var(--muted-foreground)] rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/50">
         Belum ada tiket taruhan pada filter ini. Pasang sinyal dari tabel di atas untuk mulai mencatat.
       </div>
     `;
     return;
   }
 
-  list.innerHTML = filtered.map(b => {
-    const payout = Math.round(b.stake * b.odds);
-    const profit = payout - b.stake;
+  // Urutkan tiket kronologis terbaru di atas
+  const sorted = [...filtered].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
 
-    let statusBadge = '';
+  list.innerHTML = sorted.map(b => {
+    const payout = Math.round((b.stake || 0) * (b.odds || 1));
+    const profit = payout - (b.stake || 0);
+
+    let statusText = 'PENDING';
+    let statusBadgeClass = 'bg-amber-500/10 text-amber-500 border border-amber-500/30';
     if (b.status === 'won') {
-      statusBadge = '<span class="text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 rounded font-bold">MENANG (+Rp ' + profit.toLocaleString('id-ID') + ')</span>';
+      statusText = 'WON';
+      statusBadgeClass = 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30';
     } else if (b.status === 'lost') {
-      statusBadge = '<span class="text-[10px] bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 px-2 py-0.5 rounded font-bold">KALAH (-Rp ' + b.stake.toLocaleString('id-ID') + ')</span>';
+      statusText = 'LOST';
+      statusBadgeClass = 'bg-rose-500/10 text-rose-500 border border-rose-500/30';
     } else if (b.status === 'refund') {
-      statusBadge = '<span class="text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 px-2 py-0.5 rounded font-bold">REFUND (Rp ' + b.stake.toLocaleString('id-ID') + ')</span>';
+      statusText = 'REFUND';
+      statusBadgeClass = 'bg-blue-500/10 text-blue-500 border border-blue-500/30';
+    }
+
+    const dateHeader = formatBetDateHeader(b);
+
+    let cleanMatch = b.match || '';
+    if (cleanMatch.includes(']')) {
+      const parts = cleanMatch.split(']');
+      cleanMatch = parts[parts.length - 1].replace(/\(@.*?\)/, '').trim();
+    }
+
+    const selLabel = getBetSelectionLabel(b);
+    let pilihanText = selLabel.toLowerCase().startsWith('pilihan:') ? selLabel : `Pilihan: ${selLabel}`;
+
+    let payoutHtml = '';
+    if (b.status === 'lost') {
+      payoutHtml = `<span class="text-rose-400 font-bold">Payout: Rp 0 (-Rp ${(b.stake || 0).toLocaleString('id-ID')})</span>`;
+    } else if (b.status === 'refund') {
+      payoutHtml = `<span class="text-amber-400 font-bold">Payout: Rp ${(b.stake || 0).toLocaleString('id-ID')} (Refund)</span>`;
     } else {
-      statusBadge = '<span class="text-[10px] bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 px-2 py-0.5 rounded font-bold">MENUNGGU</span>';
+      payoutHtml = `<span class="text-teal-400 dark:text-teal-400 font-bold">Payout: Rp ${payout.toLocaleString('id-ID')} (+Rp ${profit.toLocaleString('id-ID')})</span>`;
     }
 
     return `
-      <div class="p-3 rounded-xl border border-[var(--border)] bg-[var(--card)] flex flex-wrap items-center justify-between gap-2.5 text-xs">
-        <div class="space-y-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <strong class="text-sm font-black text-[var(--foreground)]">${b.match}</strong>
-            <span class="text-[11px] font-bold text-primary px-2 py-0.5 bg-primary/10 rounded">${b.typeLabel}</span>
-            ${statusBadge}
-          </div>
-          <div class="text-[11px] text-[var(--muted-foreground)] flex items-center gap-2">
-            <span>Odds: <strong class="font-mono text-[var(--foreground)]">${b.odds}</strong></span>
-            <span>•</span>
-            <span>Modal: <strong class="font-mono text-[var(--foreground)]">Rp ${b.stake.toLocaleString('id-ID')}</strong></span>
-            <span>•</span>
-            <span>Potensi: <strong class="font-mono text-emerald-600">Rp ${payout.toLocaleString('id-ID')}</strong></span>
+      <div class="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--background)] space-y-2.5 text-xs shadow-xs transition-all hover:border-slate-600">
+        <!-- Top bar: Date & Status Action Buttons -->
+        <div class="flex items-center justify-between text-[11px] text-[var(--muted-foreground)] border-b border-[var(--border)]/70 pb-2">
+          <span class="font-medium text-slate-400">${dateHeader}</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9.5px] px-2 py-0.5 rounded font-black tracking-wider ${statusBadgeClass}">${statusText}</span>
+            <button onclick="toggleBetStatus('${b.id}', 'won')" class="w-5 h-5 rounded bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center transition-all shadow-xs cursor-pointer" title="Tandai Menang">W</button>
+            <button onclick="toggleBetStatus('${b.id}', 'lost')" class="w-5 h-5 rounded bg-rose-500 hover:bg-rose-600 text-white font-bold text-[10px] flex items-center justify-center transition-all shadow-xs cursor-pointer" title="Tandai Kalah">L</button>
+            <button onclick="deleteBetRecord('${b.id}')" class="w-5 h-5 rounded bg-slate-600 hover:bg-slate-500 text-white font-bold text-[10px] flex items-center justify-center transition-all shadow-xs cursor-pointer" title="Hapus Tiket">✕</button>
           </div>
         </div>
 
-        <div class="flex items-center gap-1.5 shrink-0">
-          ${b.status === 'pending' ? `
-            <button onclick="updateBetStatus('${b.id}', 'won')" class="btn-sm text-[10.5px] text-emerald-600 hover:bg-emerald-50">✅ Menang</button>
-            <button onclick="updateBetStatus('${b.id}', 'lost')" class="btn-sm text-[10.5px] text-rose-600 hover:bg-rose-50">❌ Kalah</button>
-            <button onclick="updateBetStatus('${b.id}', 'refund')" class="btn-sm text-[10.5px] text-amber-600 hover:bg-amber-50">🔄 Refund</button>
-          ` : `
-            <button onclick="updateBetStatus('${b.id}', 'pending')" class="btn-sm text-[10.5px] text-slate-500">↩️ Buka Kembali</button>
-          `}
-          <button onclick="deleteBetRecord('${b.id}')" class="btn-sm text-[10.5px] text-rose-500 hover:bg-rose-50" title="Hapus tiket">🗑️</button>
+        <!-- Middle bar: Match title, selection, odds -->
+        <div class="flex items-center justify-between flex-wrap gap-2 pt-0.5">
+          <div>
+            <div class="font-bold text-[13.5px] text-[var(--foreground)]">${cleanMatch}</div>
+            <div class="text-[11px] text-teal-400 dark:text-teal-400 font-semibold mt-0.5">${pilihanText}</div>
+          </div>
+          <div class="text-right">
+            <span class="font-mono font-bold text-sm sm:text-base text-[var(--foreground)]">@${b.odds}</span>
+          </div>
+        </div>
+
+        <!-- Bottom bar: Modal & Payout -->
+        <div class="p-2.5 rounded-lg bg-[var(--muted)]/40 border border-[var(--border)] flex items-center justify-between text-xs">
+          <span class="text-[var(--muted-foreground)]">Modal: <strong class="text-[var(--foreground)] font-mono">Rp ${(b.stake || 0).toLocaleString('id-ID')}</strong></span>
+          ${payoutHtml}
         </div>
       </div>
     `;
